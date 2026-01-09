@@ -4,7 +4,7 @@ Users router for user profile CRUD operations.
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from src.api.schemas import UserProfile, UserProfileUpdate
-from src.api.config import supabase
+from src.api.config import get_supabase_client
 from src.api.middleware import security, get_current_user
 from datetime import datetime
 
@@ -38,26 +38,28 @@ async def get_profile(credentials: HTTPAuthorizationCredentials = Depends(securi
         HTTPException: If profile not found or user not authenticated
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         response = supabase.table("user_profiles").select("*").eq("id", user["id"]).execute()
-        
+
         if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
         profile = response.data[0]
         return UserProfile(**profile)
-    
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve profile: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve profile: {str(e)}")
 
 
 @router.put(
@@ -92,37 +94,36 @@ async def update_profile(
         HTTPException: If update fails or user not authenticated
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Prepare update data
         update_data = profile_update.model_dump(exclude_unset=True)
         if not update_data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No fields to update"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+
         update_data["updated_at"] = datetime.utcnow().isoformat()
-        
+
         # Update profile
         response = supabase.table("user_profiles").update(update_data).eq("id", user["id"]).execute()
-        
+
         if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
         updated_profile = response.data[0]
         return UserProfile(**updated_profile)
-    
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update profile: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update profile: {str(e)}")
 
 
 @router.delete(
@@ -149,18 +150,23 @@ async def delete_profile(credentials: HTTPAuthorizationCredentials = Depends(sec
         HTTPException: If deletion fails or user not authenticated
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Delete user profile
         supabase.table("user_profiles").delete().eq("id", user["id"]).execute()
-        
+
         # Note: Supabase Auth user deletion requires admin privileges
         # In production, this should be handled by an admin endpoint or background job
-        
+
         return None
-    
+
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete profile: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete profile: {str(e)}")

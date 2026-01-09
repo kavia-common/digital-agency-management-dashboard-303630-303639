@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from typing import List
 from src.api.schemas import Client, ClientCreate, ClientUpdate
-from src.api.config import supabase
+from src.api.config import get_supabase_client
 from src.api.middleware import security, get_current_user
 from datetime import datetime
 
@@ -44,14 +44,22 @@ async def create_client(
         HTTPException: If creation fails or user not authenticated
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Prepare client data
         new_client = client_data.model_dump()
         new_client["user_id"] = user["id"]
         new_client["created_at"] = datetime.utcnow().isoformat()
         new_client["updated_at"] = datetime.utcnow().isoformat()
-        
+
         # Insert client
         response = supabase.table("clients").insert(new_client).execute()
         
@@ -99,7 +107,15 @@ async def list_clients(credentials: HTTPAuthorizationCredentials = Depends(secur
         HTTPException: If retrieval fails or user not authenticated
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         response = supabase.table("clients").select("*").eq("user_id", user["id"]).execute()
         
@@ -145,7 +161,15 @@ async def get_client(
         HTTPException: If client not found or user not authorized
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         response = supabase.table("clients").select("*").eq("id", client_id).eq("user_id", user["id"]).execute()
         
@@ -201,7 +225,15 @@ async def update_client(
         HTTPException: If update fails or user not authorized
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Prepare update data
         update_data = client_update.model_dump(exclude_unset=True)
@@ -210,9 +242,9 @@ async def update_client(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No fields to update"
             )
-        
+
         update_data["updated_at"] = datetime.utcnow().isoformat()
-        
+
         # Update client
         response = supabase.table("clients").update(update_data).eq("id", client_id).eq("user_id", user["id"]).execute()
         
@@ -263,7 +295,15 @@ async def delete_client(
         HTTPException: If deletion fails or user not authorized
     """
     user = await get_current_user(credentials)
-    
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         response = supabase.table("clients").delete().eq("id", client_id).eq("user_id", user["id"]).execute()
         

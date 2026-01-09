@@ -4,14 +4,22 @@ Authentication router for user signup, login, logout, and password reset.
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from src.api.schemas import (
-    SignupRequest, LoginRequest, PasswordResetRequest, 
-    AuthResponse, MessageResponse
+    SignupRequest,
+    LoginRequest,
+    PasswordResetRequest,
+    AuthResponse,
+    MessageResponse,
 )
-from src.api.config import supabase, SITE_URL
+from src.api.config import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    JWT_ALGORITHM,
+    JWT_SECRET,
+    SITE_URL,
+    get_supabase_client,
+)
 from src.api.middleware import security, get_current_user
 import jwt
 from datetime import datetime, timedelta
-from src.api.config import JWT_SECRET, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -19,14 +27,24 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # PUBLIC_INTERFACE
 def create_access_token(data: dict) -> str:
     """
-    Create JWT access token.
-    
+    Create JWT access token (locally signed).
+
+    Note:
+        This backend primarily relies on Supabase-issued JWTs. Local JWT signing is
+        supported only when JWT_SECRET is configured.
+
     Args:
-        data: Dictionary containing token payload data
-        
+        data: Dictionary containing token payload data.
+
     Returns:
-        str: Encoded JWT token
+        str: Encoded JWT token.
+
+    Raises:
+        RuntimeError: If JWT_SECRET is not configured.
     """
+    if not JWT_SECRET:
+        raise RuntimeError("JWT_SECRET is not configured; cannot create locally signed JWT")
+
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
@@ -48,69 +66,70 @@ def create_access_token(data: dict) -> str:
 async def signup(user_data: SignupRequest):
     """
     Register a new user.
-    
+
     Creates a new user account in Supabase Auth with email and password.
     Also creates a user profile record with the provided full name.
-    
+
     Args:
-        user_data: SignupRequest containing email, password, and full name
-        
+        user_data: SignupRequest containing email, password, and full name.
+
     Returns:
-        AuthResponse: Access token and user information
-        
+        AuthResponse: Access token and user information.
+
     Raises:
-        HTTPException: If signup fails or user already exists
+        HTTPException: If signup fails or user already exists.
     """
     try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        # Supabase is required for these auth routes; don't crash with NoneType.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
+    try:
         # Sign up user with Supabase Auth
-        response = supabase.auth.sign_up({
-            "email": user_data.email,
-            "password": user_data.password,
-            "options": {
-                "data": {
-                    "full_name": user_data.full_name
+        response = supabase.auth.sign_up(
+            {
+                "email": user_data.email,
+                "password": user_data.password,
+                "options": {
+                    "data": {"full_name": user_data.full_name},
+                    "email_redirect_to": SITE_URL,
                 },
-                "email_redirect_to": SITE_URL
             }
-        })
-        
+        )
+
         if not response.user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to create user"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to create user")
+
         # Create user profile in database
         profile_data = {
             "id": response.user.id,
             "email": user_data.email,
             "full_name": user_data.full_name,
             "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
-        
+
         supabase.table("user_profiles").insert(profile_data).execute()
-        
-        # Create access token
+
+        # Use Supabase-issued JWT when available; fallback to local signing only if configured.
         access_token = response.session.access_token if response.session else create_access_token(
             data={"sub": response.user.id, "email": response.user.email}
         )
-        
+
         return AuthResponse(
             access_token=access_token,
             token_type="bearer",
-            user={
-                "id": response.user.id,
-                "email": response.user.email,
-                "full_name": user_data.full_name
-            }
+            user={"id": response.user.id, "email": response.user.email, "full_name": user_data.full_name},
         )
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Signup failed: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Signup failed: {str(e)}")
 
 
 @router.post(
@@ -126,53 +145,48 @@ async def signup(user_data: SignupRequest):
 async def login(credentials: LoginRequest):
     """
     Authenticate user and return access token.
-    
+
     Validates user credentials against Supabase Auth and returns
-    a JWT access token for subsequent authenticated requests.
-    
+    the Supabase session access token for subsequent authenticated requests.
+
     Args:
-        credentials: LoginRequest containing email and password
-        
+        credentials: LoginRequest containing email and password.
+
     Returns:
-        AuthResponse: Access token and user information
-        
+        AuthResponse: Access token and user information.
+
     Raises:
-        HTTPException: If login fails or credentials are invalid
+        HTTPException: If login fails or credentials are invalid.
     """
     try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
+    try:
         # Sign in with Supabase Auth
-        response = supabase.auth.sign_in_with_password({
-            "email": credentials.email,
-            "password": credentials.password
-        })
-        
-        if not response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
-        
-        # Get user profile
+        response = supabase.auth.sign_in_with_password({"email": credentials.email, "password": credentials.password})
+
+        if not response.user or not response.session:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+        # Get user profile (best-effort; may be empty if not created yet)
         profile_response = supabase.table("user_profiles").select("*").eq("id", response.user.id).execute()
         profile = profile_response.data[0] if profile_response.data else {}
-        
+
         return AuthResponse(
             access_token=response.session.access_token,
             token_type="bearer",
-            user={
-                "id": response.user.id,
-                "email": response.user.email,
-                "full_name": profile.get("full_name", "")
-            }
+            user={"id": response.user.id, "email": response.user.email, "full_name": profile.get("full_name", "")},
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Login failed: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Login failed: {str(e)}")
 
 
 @router.post(
@@ -188,32 +202,39 @@ async def login(credentials: LoginRequest):
 async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """
     Log out the current user.
-    
+
     Invalidates the user's session in Supabase Auth.
-    
+
     Args:
-        credentials: HTTP authorization credentials from the request
-        
+        credentials: HTTP authorization credentials from the request.
+
     Returns:
-        MessageResponse: Confirmation message
-        
+        MessageResponse: Confirmation message.
+
     Raises:
-        HTTPException: If logout fails
+        HTTPException: If logout fails.
     """
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Verify user is authenticated
         await get_current_user(credentials)
-        
-        # Sign out from Supabase
+
+        # Sign out from Supabase (best-effort)
         supabase.auth.sign_out()
-        
+
         return MessageResponse(message="Logged out successfully")
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Logout failed: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Logout failed: {str(e)}")
 
 
 @router.post(
@@ -229,35 +250,31 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def reset_password(reset_data: PasswordResetRequest):
     """
     Send password reset email to user.
-    
+
     Triggers Supabase Auth password reset flow. User will receive
     an email with a link to reset their password.
-    
+
     Args:
-        reset_data: PasswordResetRequest containing user email
-        
+        reset_data: PasswordResetRequest containing user email.
+
     Returns:
-        MessageResponse: Confirmation message
-        
-    Raises:
-        HTTPException: If password reset request fails
+        MessageResponse: Confirmation message.
     """
     try:
+        supabase = get_supabase_client()
+    except Exception:
+        # For security, respond with same message even if Supabase isn't configured.
+        return MessageResponse(message="If the email exists, a password reset link has been sent")
+
+    try:
         # Request password reset from Supabase
-        supabase.auth.reset_password_email(
-            reset_data.email,
-            options={"redirect_to": f"{SITE_URL}/reset-password"}
-        )
-        
-        return MessageResponse(
-            message="If the email exists, a password reset link has been sent"
-        )
-    
+        supabase.auth.reset_password_email(reset_data.email, options={"redirect_to": f"{SITE_URL}/reset-password"})
+
+        return MessageResponse(message="If the email exists, a password reset link has been sent")
+
     except Exception:
         # Don't reveal if email exists or not for security
-        return MessageResponse(
-            message="If the email exists, a password reset link has been sent"
-        )
+        return MessageResponse(message="If the email exists, a password reset link has been sent")
 
 
 @router.get(
