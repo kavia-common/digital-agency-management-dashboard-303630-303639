@@ -4,7 +4,7 @@ Dashboard router for analytics and data aggregation.
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from src.api.schemas import DashboardStats, Project
-from src.api.config import supabase
+from src.api.config import get_supabase_client
 from src.api.middleware import security, get_current_user
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -42,6 +42,14 @@ async def get_dashboard_stats(credentials: HTTPAuthorizationCredentials = Depend
         HTTPException: If retrieval fails or user not authenticated
     """
     user = await get_current_user(credentials)
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
     
     try:
         # Get all projects for the user

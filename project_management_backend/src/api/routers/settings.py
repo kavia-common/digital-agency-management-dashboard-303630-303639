@@ -4,7 +4,7 @@ Settings router for user preferences and data export.
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from src.api.schemas import UserSettings, ThemePreference, DataExportResponse
-from src.api.config import supabase
+from src.api.config import get_supabase_client
 from src.api.middleware import security, get_current_user
 from datetime import datetime
 
@@ -38,6 +38,14 @@ async def get_settings(credentials: HTTPAuthorizationCredentials = Depends(secur
         HTTPException: If retrieval fails or user not authenticated
     """
     user = await get_current_user(credentials)
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
     
     try:
         # Try to get existing settings
@@ -105,6 +113,14 @@ async def update_theme(
         HTTPException: If update fails or user not authenticated
     """
     user = await get_current_user(credentials)
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
     
     try:
         update_data = {
@@ -174,6 +190,14 @@ async def export_data(credentials: HTTPAuthorizationCredentials = Depends(securi
         HTTPException: If export fails or user not authenticated
     """
     user = await get_current_user(credentials)
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
     
     try:
         # Get user profile

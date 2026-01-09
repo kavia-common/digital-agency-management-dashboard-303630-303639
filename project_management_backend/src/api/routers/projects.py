@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from typing import List
 from src.api.schemas import Project, ProjectCreate, ProjectUpdate
-from src.api.config import supabase
+from src.api.config import get_supabase_client
 from src.api.middleware import security, get_current_user
 from datetime import datetime
 
@@ -45,6 +45,14 @@ async def create_project(
     """
     user = await get_current_user(credentials)
     
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Prepare project data
         new_project = project_data.model_dump()
@@ -101,6 +109,14 @@ async def list_projects(credentials: HTTPAuthorizationCredentials = Depends(secu
     user = await get_current_user(credentials)
     
     try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
+    try:
         response = supabase.table("projects").select("*").eq("user_id", user["id"]).execute()
         
         projects = [Project(**project) for project in response.data]
@@ -146,6 +162,14 @@ async def get_project(
     """
     user = await get_current_user(credentials)
     
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         response = supabase.table("projects").select("*").eq("id", project_id).eq("user_id", user["id"]).execute()
         
@@ -202,6 +226,14 @@ async def update_project(
     """
     user = await get_current_user(credentials)
     
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         # Prepare update data
         update_data = project_update.model_dump(exclude_unset=True)
@@ -264,6 +296,14 @@ async def delete_project(
     """
     user = await get_current_user(credentials)
     
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Supabase is not configured/available: {str(e)}",
+        )
+
     try:
         response = supabase.table("projects").delete().eq("id", project_id).eq("user_id", user["id"]).execute()
         
